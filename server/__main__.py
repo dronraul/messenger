@@ -1,11 +1,14 @@
 import yaml
 import json
+import select
 import logging
 from socket import socket
 from argparse import ArgumentParser
 
 from protocol import validate_request, make_response
+from handlers import handle_default_request
 from resolvers import resolve
+
 
 parser = ArgumentParser()
 
@@ -29,17 +32,6 @@ if args.config:
 
 host, port = (default_config.get('host'), default_config.get('port'))
 
-# logger = logging.getLogger('main')
-# logger.setLevel(logging.DEBUG)
-
-# formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-
-# handler = logging.FileHandler('main.log')
-# handler.setFormatter(formatter)
-# handler.setLevel(logging.DEBUG)
-
-# logger.addHandler(handler)
-
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -49,44 +41,46 @@ logging.basicConfig(
     ]
 )
 
-try:
+requests = []
+connections = []
 
+try:
     sock = socket()
     sock.bind((host, port,))
+    sock.settimeout(0)
     sock.listen(5)
 
     logging.info(f'Server was started with {host}:{port}')
 
     while True:
-        client, address = sock.accept()
+        try:
+            client, address = sock.accept()
 
-        logging.info(f'Client was connected with {address[0]}:{address[1]}')
+            connections.append(client)
 
-        b_request = client.recv(default_config.get('buffersize'))
-        request = json.loads(b_request.decode())
+            logging.info(f'Client was connected with {address[0]}:{address[1]} | Connections: {connections}')
+        except :
+            pass
 
-        if validate_request(request):
-            action_name = request.get('action')
-            controller = resolve(action_name)
-            if controller:
-                try:
-                    logging.debug(f'Controller {action_name} resolved with request: {request}')
-                    response = controller(request)
-                except Exception as err:
-                    logging.critical(f'Controller {action_name} error: {err}')
-                    response = make_response(request, 500, 'Internal server error')
-            else:
-                logging.error(f'Controller {action_name} not found')
-                response = make_response(request, 404, f'Action with name {action_name} not supported')
-        else:
-            logging.error(f'Controller wrong request: {request}')
-            response = make_response(request, 400, 'wrong request format')
+        try:
+            rlist, wlist, xlist = select.select(
+                connections, connections, connections, 0
+            )
 
-        client.send(
-            json.dumps(response).encode()
-        )
+            for r_client in rlist:
+                b_request = r_client.recv(default_config.get('buffersize'))
+                requests.append(b_request)
 
-        client.close()
+            if requests:
+                b_request = requests.pop()
+                b_response = handle_default_request(b_request)
+
+                for w_client in wlist:
+                    w_client.send(b_response)
+        except OSError:
+            pass
+
+
 
 except KeyboardInterrupt:
     logging.info('Server shutdown')
