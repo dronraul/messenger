@@ -1,0 +1,7 @@
+venv
+__pycache__
+.ipynb_checkpoints
+project.code-workspace
+.coverage
+.DS_Store
+*.log
